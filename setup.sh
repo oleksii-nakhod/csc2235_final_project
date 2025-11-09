@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Test if script is working
+echo "Setup script is running..." >> /local/repository/setup.log
+
 # Wait for any automatic system updates to finish
 sudo DEBIAN_FRONTEND=noninteractive apt-get -y update
 
