@@ -3,11 +3,11 @@
 # --- Fair Benchmarking Harness ---
 #
 # USAGE:
-#   sudo ./run.sh <pipeline_name> [framework_name]
+#   sudo ./run_fair.sh <pipeline_name> [framework_name]
 #
 # EXAMPLES:
-#   sudo ./run.sh nyc_taxi          (Runs all frameworks in pipelines/nyc_taxi/)
-#   sudo ./run.sh nyc_taxi duckdb   (Runs only pipelines/nyc_taxi/duckdb.py)
+#   sudo ./run_fair.sh nyc_taxi          (Runs all frameworks in pipelines/nyc_taxi/)
+#   sudo ./run_fair.sh nyc_taxi duckdb   (Runs only pipelines/nyc_taxi/duckdb.py)
 #
 
 # 1. Argument Validation
@@ -41,11 +41,14 @@ RESULTS_PIPELINE_DIR="$RESULTS_DIR/$PIPELINE_NAME"
 mkdir -p "$RESULTS_PIPELINE_DIR"
 echo "Results will be saved to: $RESULTS_DIR"
 
+# --- DEFINE VENV PYTHON PATH ---
+# This is the key fix. We use the absolute path.
+VENV_PYTHON="/local/repository/venv/bin/python3"
+
 # 3. Find and Run Scripts
 TARGET_SCRIPTS=()
 if [ -z "$FRAMEWORK_NAME" ]; then
     echo "Running all frameworks for pipeline: $PIPELINE_NAME"
-    # Find all .py files except __init__.py
     for script in $(find "$PIPELINE_DIR" -maxdepth 1 -name "*.py" ! -name "__init__.py"); do
         TARGET_SCRIPTS+=("$script")
     done
@@ -79,14 +82,14 @@ for script in "${TARGET_SCRIPTS[@]}"; do
     echo "  Caches cleared."
 
     echo "Step 2: Running benchmark as user '$SUDO_USER'..."
-    # Export the results directory so the Python script knows where to save
     export RESULTS_DIR="$FRAMEWORK_RESULTS_DIR"
     
-    # Run the command as the original user, not as root
+    # --- THIS LINE IS FIXED ---
+    # We now call the venv python directly
     if [ -n "$SUDO_USER" ]; then
-        su "$SUDO_USER" -c "python3 $script"
+        su "$SUDO_USER" -c "$VENV_PYTHON $script"
     else
-        python3 "$script"
+        "$VENV_PYTHON" "$script"
     fi
     
     if [ $? -ne 0 ]; then
@@ -95,7 +98,6 @@ for script in "${TARGET_SCRIPTS[@]}"; do
         echo "--- Finished: $script ---"
     fi
     
-    # Unset for the next loop
     unset RESULTS_DIR
 done
 
@@ -104,10 +106,12 @@ echo ""
 echo "--------------------------------------------------------"
 echo "--- Generating Comparison Visualizations ---"
 echo "--------------------------------------------------------"
+
+# --- THIS LINE IS ALSO FIXED ---
 if [ -n "$SUDO_USER" ]; then
-    su "$SUDO_USER" -c "python3 common/visualize.py $RESULTS_DIR"
+    su "$SUDO_USER" -c "$VENV_PYTHON common/visualize.py $RESULTS_DIR"
 else
-    python3 common/visualize.py "$RESULTS_DIR"
+    "$VENV_PYTHON" common/visualize.py "$RESULTS_DIR"
 fi
 
 echo "--- All complete. Results are in $RESULTS_DIR ---"
