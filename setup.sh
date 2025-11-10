@@ -16,26 +16,32 @@ fi
 echo "Found project user: $USER_NAME with home: $USER_HOME" >> /local/repository/setup.log
 
 # 3. Create and activate a virtual environment
-python3 -m venv /local/repository/venv
-source /local/repository/venv/bin/activate
+sudo -u "$USER_NAME" bash -c "
+    echo 'Creating venv as $USER_NAME...' >> /local/repository/setup.log
+    python3 -m venv /local/repository/venv
+    
+    echo 'Activating venv and installing requirements...' >> /local/repository/setup.log
+    source /local/repository/venv/bin/activate
+    pip install --upgrade pip
+    pip install -r /local/repository/requirements.txt
+"
 
 # Install dependencies inside the venv
 pip install --upgrade pip
 pip install -r /local/repository/requirements.txt
 
-# 4. Add venv activation to the user's .bashrc
-# This appends the line to the user's .bashrc file
-BASHRC_PATH="$USER_HOME/.bashrc"
+# 4. Add venv activation to the user's .profile (for SSH login)
+PROFILE_PATH="$USER_HOME/.profile"
 ACTIVATE_LINE="source /local/repository/venv/bin/activate"
 
-# Check if the line already exists to avoid duplicates (makes script idempotent)
-if ! grep -qF -- "$ACTIVATE_LINE" "$BASHRC_PATH"; then
-    echo "Adding venv activation to $BASHRC_PATH" >> /local/repository/setup.log
-    echo "" >> "$BASHRC_PATH"
-    echo "# Automatically activate project venv" >> "$BASHRC_PATH"
-    echo "$ACTIVATE_LINE" >> "$BASHRC_PATH"
+# Check if the line already exists to avoid duplicates
+if ! grep -qF -- "$ACTIVATE_LINE" "$PROFILE_PATH"; then
+    echo "Adding venv activation to $PROFILE_PATH" >> /local/repository/setup.log
+    echo "" >> "$PROFILE_PATH"
+    echo "# Automatically activate project venv" >> "$PROFILE_PATH"
+    echo "$ACTIVATE_LINE" >> "$PROFILE_PATH"
 else
-    echo "Venv activation already in $BASHRC_PATH" >> /local/repository/setup.log
+    echo "Venv activation already in $PROFILE_PATH" >> /local/repository/setup.log
 fi
 
 echo "Setup complete. venv will auto-activate on next login for $USER_NAME." >> /local/repository/setup.log
