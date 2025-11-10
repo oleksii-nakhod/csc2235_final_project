@@ -1,5 +1,6 @@
 import os
 import urllib.request
+import time
 
 def get_year_month_list(start_year, start_month, end_year, end_month):
     """
@@ -46,6 +47,7 @@ def download_taxi_data(year_month_list, local_dir="data/nyc_taxi"):
         print(f"  Downloading: {file_name} to {local_dir}/")
         url = f"{BASE_URL}{year}-{month_str}.parquet"
         try:
+            time.sleep(2)
             urllib.request.urlretrieve(url, local_path)
             print(f"  Success: Downloaded {file_name}")
         except Exception as e:
