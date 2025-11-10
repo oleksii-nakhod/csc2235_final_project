@@ -26,7 +26,7 @@ if [ ! -d "$PIPELINE_DIR" ]; then
 fi
 
 TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
-RESULTS_DIR="results/$TIMESTAMP" # <-- This is the main variable
+RESULTS_DIR="results/$TIMESTAMP"
 RESULTS_PIPELINE_DIR="$RESULTS_DIR/$PIPELINE_NAME"
 
 mkdir -p "$RESULTS_PIPELINE_DIR"
@@ -38,12 +38,14 @@ VENV_PYTHON="/local/repository/venv/bin/python3"
 TARGET_SCRIPTS=()
 if [ -z "$FRAMEWORK_NAME" ]; then
     echo "Running all frameworks for pipeline: $PIPELINE_NAME"
-    for script in $(find "$PIPELINE_DIR" -maxdepth 1 -name "*.py" ! -name "__init__.py"); do
+    # --- 1. MODIFIED: Look for *_pipeline.py ---
+    for script in $(find "$PIPELINE_DIR" -maxdepth 1 -name "*_pipeline.py" ! -name "__init__.py"); do
         TARGET_SCRIPTS+=("$script")
     done
 else
     echo "Running framework '$FRAMEWORK_NAME' for pipeline: $PIPELINE_NAME"
-    SCRIPT_PATH="$PIPELINE_DIR/$FRAMEWORK_NAME.py"
+    # --- 2. MODIFIED: Look for <framework>_pipeline.py ---
+    SCRIPT_PATH="$PIPELINE_DIR/${FRAMEWORK_NAME}_pipeline.py"
     if [ ! -f "$SCRIPT_PATH" ]; then
         echo "Error: Framework script not found: $SCRIPT_PATH"
         exit 1
@@ -55,7 +57,8 @@ echo "Found ${#TARGET_SCRIPTS[@]} script(s) to run."
 
 # 4. Execute Benchmark(s)
 for script in "${TARGET_SCRIPTS[@]}"; do
-    FRAMEWORK=$(basename "$script" .py)
+    # --- 3. MODIFIED: Extract framework name correctly ---
+    FRAMEWORK=$(basename "$script" _pipeline.py)
     FRAMEWORK_RESULTS_DIR="$RESULTS_PIPELINE_DIR/$FRAMEWORK"
     
     mkdir -p "$FRAMEWORK_RESULTS_DIR"
@@ -87,9 +90,7 @@ for script in "${TARGET_SCRIPTS[@]}"; do
         echo "--- Finished: $script ---"
     fi
     
-    # Unset the temporary variable
     unset SCRIPT_RESULTS_DIR
-    # --- END FIX ---
 done
 
 # 5. Generate Comparison Visualizations
@@ -99,6 +100,5 @@ echo "--- Generating Comparison Visualizations ---"
 echo "--------------------------------------------------------"
 
 "$VENV_PYTHON" common/visualize.py "$RESULTS_DIR"
-# --- END FIX ---
 
 echo "--- All complete. Results are in $RESULTS_DIR ---"

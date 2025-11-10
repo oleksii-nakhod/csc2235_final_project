@@ -8,6 +8,7 @@ import glob
 import urllib.request
 import math
 import warnings
+from memory_profiler import memory_usage
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.append(PROJECT_ROOT)
