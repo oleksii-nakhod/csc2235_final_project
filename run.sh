@@ -2,7 +2,7 @@
 
 # --- Fair Benchmarking Harness ---
 #
-# NEW USAGE:
+# USAGE:
 #   ./run.sh <pipeline_name> [framework_name]
 #
 # NOTE: Run this script *without* sudo. It will call sudo itself
@@ -15,13 +15,10 @@ if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
     exit 1
 fi
 
-# --- REMOVED SUDO CHECK ---
-# We now run this script as the normal user.
-
 PIPELINE_NAME="$1"
-FRAMEWORK_NAME="$2" # This might be empty
+FRAMEWORK_NAME="$2"
 
-# 2. Setup Directories (now run as you, not root)
+# 2. Setup Directories
 PIPELINE_DIR="pipelines/$PIPELINE_NAME"
 if [ ! -d "$PIPELINE_DIR" ]; then
     echo "Error: Pipeline directory not found: $PIPELINE_DIR"
@@ -29,10 +26,9 @@ if [ ! -d "$PIPELINE_DIR" ]; then
 fi
 
 TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
-RESULTS_DIR="results/$TIMESTAMP"
+RESULTS_DIR="results/$TIMESTAMP" # <-- This is the main variable
 RESULTS_PIPELINE_DIR="$RESULTS_DIR/$PIPELINE_NAME"
 
-# This is now created by the user, so permissions are correct
 mkdir -p "$RESULTS_PIPELINE_DIR"
 echo "Results will be saved to: $RESULTS_DIR"
 
@@ -62,7 +58,6 @@ for script in "${TARGET_SCRIPTS[@]}"; do
     FRAMEWORK=$(basename "$script" .py)
     FRAMEWORK_RESULTS_DIR="$RESULTS_PIPELINE_DIR/$FRAMEWORK"
     
-    # This is also created by the user, so permissions are correct
     mkdir -p "$FRAMEWORK_RESULTS_DIR"
 
     echo ""
@@ -71,10 +66,7 @@ for script in "${TARGET_SCRIPTS[@]}"; do
     echo "--- Results Dir: $FRAMEWORK_RESULTS_DIR ---"
     echo "--------------------------------------------------------"
 
-    # --- THIS BLOCK IS THE NEW LOGIC ---
     echo "Step 1: Clearing OS Page Cache (requires sudo)..."
-    # Call sudo *only* for the commands that need it.
-    # We use sudo sh -c "..." for the redirection to work.
     sudo sync
     sudo sh -c "echo 3 > /proc/sys/vm/drop_caches"
     if [ $? -ne 0 ]; then
@@ -82,13 +74,11 @@ for script in "${TARGET_SCRIPTS[@]}"; do
         exit 1
     fi
     echo "  Caches cleared."
-    # --- END NEW LOGIC BLOCK ---
 
     echo "Step 2: Running benchmark as user '$(whoami)'..."
-    export RESULTS_DIR="$FRAMEWORK_RESULTS_DIR"
     
-    # --- THIS LINE IS FIXED ---
-    # No 'su' needed. Just run the command directly.
+    export SCRIPT_RESULTS_DIR="$FRAMEWORK_RESULTS_DIR"
+    
     "$VENV_PYTHON" "$script"
     
     if [ $? -ne 0 ]; then
@@ -97,7 +87,9 @@ for script in "${TARGET_SCRIPTS[@]}"; do
         echo "--- Finished: $script ---"
     fi
     
-    unset RESULTS_DIR
+    # Unset the temporary variable
+    unset SCRIPT_RESULTS_DIR
+    # --- END FIX ---
 done
 
 # 5. Generate Comparison Visualizations
@@ -106,8 +98,7 @@ echo "--------------------------------------------------------"
 echo "--- Generating Comparison Visualizations ---"
 echo "--------------------------------------------------------"
 
-# --- THIS LINE IS ALSO FIXED ---
-# No 'su' needed. The $RESULTS_DIR argument will now pass correctly.
 "$VENV_PYTHON" common/visualize.py "$RESULTS_DIR"
+# --- END FIX ---
 
 echo "--- All complete. Results are in $RESULTS_DIR ---"
