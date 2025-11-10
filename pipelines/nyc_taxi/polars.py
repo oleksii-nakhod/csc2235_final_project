@@ -43,7 +43,7 @@ def run_polars_pipeline(config, global_results_df):
 if __name__ == "__main__":
     print("--- Polars NYC Taxi STUB Benchmark ---")
     
-    RESULTS_DIR = os.environ.get('RESULTS_DIR')
+    RESULTS_DIR = os.environ.get('SCRIPT_RESULTS_DIR')
     if not RESULTS_DIR:
         RESULTS_DIR = "results/local_test/nyc_taxi/polars"
         os.makedirs(RESULTS_DIR, exist_ok=True)

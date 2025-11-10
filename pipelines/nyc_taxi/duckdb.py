@@ -164,7 +164,7 @@ def run_full_pipeline(config, global_results_df):
 
 
 if __name__ == "__main__":
-    RESULTS_DIR = os.environ.get('RESULTS_DIR')
+    RESULTS_DIR = os.environ.get('SCRIPT_RESULTS_DIR')
     if not RESULTS_DIR:
         print("Error: RESULTS_DIR environment variable not set. Run this via run_fair.sh")
         RESULTS_DIR = "results/local_test/nyc_taxi/duckdb"
