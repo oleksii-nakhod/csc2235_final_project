@@ -2,32 +2,26 @@
 
 # --- Fair Benchmarking Harness ---
 #
-# USAGE:
-#   sudo ./run_fair.sh <pipeline_name> [framework_name]
+# NEW USAGE:
+#   ./run.sh <pipeline_name> [framework_name]
 #
-# EXAMPLES:
-#   sudo ./run_fair.sh nyc_taxi          (Runs all frameworks in pipelines/nyc_taxi/)
-#   sudo ./run_fair.sh nyc_taxi duckdb   (Runs only pipelines/nyc_taxi/duckdb.py)
-#
+# NOTE: Run this script *without* sudo. It will call sudo itself
+#       only for the one command that needs it (clearing cache).
 
 # 1. Argument Validation
 if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
     echo "Usage: $0 <pipeline_name> [framework_name]"
     echo "Example: $0 nyc_taxi"
-    echo "Example: $0 nyc_taxi duckdb"
     exit 1
 fi
 
-if [ "$EUID" -ne 0 ]; then
-    echo "!!! Please run this script with sudo !!!"
-    echo "Sudo is required to clear the OS page cache for a fair 'cold run'."
-    exit 1
-fi
+# --- REMOVED SUDO CHECK ---
+# We now run this script as the normal user.
 
 PIPELINE_NAME="$1"
 FRAMEWORK_NAME="$2" # This might be empty
 
-# 2. Setup Directories
+# 2. Setup Directories (now run as you, not root)
 PIPELINE_DIR="pipelines/$PIPELINE_NAME"
 if [ ! -d "$PIPELINE_DIR" ]; then
     echo "Error: Pipeline directory not found: $PIPELINE_DIR"
@@ -38,11 +32,10 @@ TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
 RESULTS_DIR="results/$TIMESTAMP"
 RESULTS_PIPELINE_DIR="$RESULTS_DIR/$PIPELINE_NAME"
 
+# This is now created by the user, so permissions are correct
 mkdir -p "$RESULTS_PIPELINE_DIR"
 echo "Results will be saved to: $RESULTS_DIR"
 
-# --- DEFINE VENV PYTHON PATH ---
-# This is the key fix. We use the absolute path.
 VENV_PYTHON="/local/repository/venv/bin/python3"
 
 # 3. Find and Run Scripts
@@ -68,6 +61,8 @@ echo "Found ${#TARGET_SCRIPTS[@]} script(s) to run."
 for script in "${TARGET_SCRIPTS[@]}"; do
     FRAMEWORK=$(basename "$script" .py)
     FRAMEWORK_RESULTS_DIR="$RESULTS_PIPELINE_DIR/$FRAMEWORK"
+    
+    # This is also created by the user, so permissions are correct
     mkdir -p "$FRAMEWORK_RESULTS_DIR"
 
     echo ""
@@ -76,21 +71,25 @@ for script in "${TARGET_SCRIPTS[@]}"; do
     echo "--- Results Dir: $FRAMEWORK_RESULTS_DIR ---"
     echo "--------------------------------------------------------"
 
-    echo "Step 1: Clearing OS Page Cache..."
-    sync
-    echo 3 > /proc/sys/vm/drop_caches
+    # --- THIS BLOCK IS THE NEW LOGIC ---
+    echo "Step 1: Clearing OS Page Cache (requires sudo)..."
+    # Call sudo *only* for the commands that need it.
+    # We use sudo sh -c "..." for the redirection to work.
+    sudo sync
+    sudo sh -c "echo 3 > /proc/sys/vm/drop_caches"
+    if [ $? -ne 0 ]; then
+        echo "!!! Failed to clear OS cache. Ensure user $(whoami) has passwordless sudo."
+        exit 1
+    fi
     echo "  Caches cleared."
+    # --- END NEW LOGIC BLOCK ---
 
-    echo "Step 2: Running benchmark as user '$SUDO_USER'..."
+    echo "Step 2: Running benchmark as user '$(whoami)'..."
     export RESULTS_DIR="$FRAMEWORK_RESULTS_DIR"
     
     # --- THIS LINE IS FIXED ---
-    # We now call the venv python directly
-    if [ -n "$SUDO_USER" ]; then
-        su "$SUDO_USER" -c "$VENV_PYTHON $script"
-    else
-        "$VENV_PYTHON" "$script"
-    fi
+    # No 'su' needed. Just run the command directly.
+    "$VENV_PYTHON" "$script"
     
     if [ $? -ne 0 ]; then
         echo "!!! Benchmark script failed: $script"
@@ -108,10 +107,7 @@ echo "--- Generating Comparison Visualizations ---"
 echo "--------------------------------------------------------"
 
 # --- THIS LINE IS ALSO FIXED ---
-if [ -n "$SUDO_USER" ]; then
-    su "$SUDO_USER" -c "$VENV_PYTHON common/visualize.py $RESULTS_DIR"
-else
-    "$VENV_PYTHON" common/visualize.py "$RESULTS_DIR"
-fi
+# No 'su' needed. The $RESULTS_DIR argument will now pass correctly.
+"$VENV_PYTHON" common/visualize.py "$RESULTS_DIR"
 
 echo "--- All complete. Results are in $RESULTS_DIR ---"
