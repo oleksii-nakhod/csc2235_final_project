@@ -29,22 +29,79 @@ def load_data(con, config):
     data_files = config['data_files']
     if not data_files:
         raise ValueError("No data files specified in config['data_files']")
-    con.execute(f"CREATE TABLE taxi_data AS SELECT * FROM read_parquet({data_files}, union_by_name=True)")
+    print(f"  Loading and unifying schema for {len(data_files)} files...")
+
+    con.execute(f"""
+        CREATE TEMPORARY TABLE raw_data AS
+        FROM read_parquet({data_files}, union_by_name=True)
+    """)
+
+    existing_cols = {r[1] for r in con.execute("PRAGMA table_info('raw_data')").fetchall()}
+
+    schema_map = {
+        'tpep_pickup_datetime':  ['tpep_pickup_datetime', 'Trip_Pickup_DateTime', 'pickup_datetime'],
+        'tpep_dropoff_datetime': ['tpep_dropoff_datetime', 'Trip_Dropoff_DateTime', 'dropoff_datetime'],
+        'fare_amount':           ['fare_amount', 'Fare_Amt'],
+        'trip_distance':         ['trip_distance', 'Trip_Distance'],
+        'payment_type':          ['payment_type', 'Payment_Type']
+    }
+
+    select_clauses = []
+    all_source_cols_to_exclude = set()
+
+    for canonical_name, source_options in schema_map.items():
+        cols_that_exist = [col for col in source_options if col in existing_cols]
+        
+        if not cols_that_exist:
+            select_clauses.append(f"NULL AS {canonical_name}")
+        else:
+            quoted_cols = [
+                f'"{c}"' if any(ch.isupper() for ch in c) else c 
+                for c in cols_that_exist
+            ]
+            select_clauses.append(f"COALESCE({', '.join(quoted_cols)}) AS {canonical_name}")
+            all_source_cols_to_exclude.update(cols_that_exist)
+
+    final_exclude_list = sorted(existing_cols.intersection(all_source_cols_to_exclude))
+    exclude_sql = ""
+    if final_exclude_list:
+        quoted_exclude_cols = [
+            f'"{c}"' if any(ch.isupper() for ch in c) else c 
+            for c in final_exclude_list
+        ]
+        exclude_sql = f"EXCLUDE ({', '.join(quoted_exclude_cols)})"
+
+    con.execute(f"""
+        CREATE TABLE taxi_data AS
+        SELECT
+            * {exclude_sql},
+            {', '.join(select_clauses)}
+        FROM raw_data
+    """)
+
+    con.execute("DROP TABLE raw_data")
+
     count = con.execute("SELECT COUNT(*) FROM taxi_data").fetchone()[0]
-    print(f"  Loaded {count} rows from {len(data_files)} files.")
+    print(f"  Loaded and unified {count} rows from {len(data_files)} files.")
     return con
+
 
 def handle_missing_values(con, config):
     mean_fare_result = con.execute("SELECT AVG(fare_amount) FROM taxi_data WHERE fare_amount > 0").fetchone()
     mean_fare = mean_fare_result[0] if mean_fare_result and mean_fare_result[0] is not None else 0.0
+    
     mean_distance_result = con.execute("SELECT AVG(trip_distance) FROM taxi_data WHERE trip_distance > 0").fetchone()
     mean_distance = mean_distance_result[0] if mean_distance_result and mean_distance_result[0] is not None else 0.0
+    
     con.execute(f"""
     CREATE TABLE taxi_clean AS
     SELECT *,
         CASE WHEN fare_amount IS NULL OR fare_amount <= 0 THEN {mean_fare} ELSE fare_amount END AS fare_amount_imputed,
         CASE WHEN trip_distance IS NULL OR trip_distance <= 0 THEN {mean_distance} ELSE trip_distance END AS trip_distance_imputed,
-        COALESCE(payment_type, 0) AS payment_type_imputed
+        
+        -- THE FIX: Cast payment_type to INTEGER and COALESCE NULLs to 0
+        COALESCE(TRY_CAST(payment_type AS INTEGER), 0) AS payment_type_imputed
+        
     FROM taxi_data
     """)
     print("  Imputed missing values.")
@@ -52,17 +109,31 @@ def handle_missing_values(con, config):
 
 def feature_engineering(con, config):
     con.execute("ALTER TABLE taxi_clean ADD COLUMN trip_duration_mins DOUBLE; ALTER TABLE taxi_clean ADD COLUMN speed_mph DOUBLE; ALTER TABLE taxi_clean ADD COLUMN is_weekend INTEGER;")
-    cols = [c[0] for c in con.execute("DESCRIBE taxi_clean").fetchall()]
-    pickup_col = 'tpep_pickup_datetime' if 'tpep_pickup_datetime' in cols else 'pickup_datetime'
-    dropoff_col = 'tpep_dropoff_datetime' if 'tpep_dropoff_datetime' in cols else 'dropoff_datetime'
-    if pickup_col not in cols or dropoff_col not in cols:
-        raise ValueError(f"Could not find valid pickup/dropoff timestamp columns. Found: {cols}")
-    print(f"  Using columns: {pickup_col}, {dropoff_col} for feature engineering.")
-    con.execute(f"UPDATE taxi_clean SET trip_duration_mins = CAST(epoch({dropoff_col} - {pickup_col}) AS DOUBLE) / 60.0;")
+    
+    pickup_col = 'tpep_pickup_datetime'
+    dropoff_col = 'tpep_dropoff_datetime'
+    
+    pickup_ts = f"TRY_CAST({pickup_col} AS TIMESTAMP)"
+    dropoff_ts = f"TRY_CAST({dropoff_col} AS TIMESTAMP)"
+
+    con.execute(f"""
+        UPDATE taxi_clean 
+        SET trip_duration_mins = CAST(
+            epoch({dropoff_ts} - {pickup_ts}) 
+        AS DOUBLE) / 60.0
+    """)
+    
     con.execute("UPDATE taxi_clean SET speed_mph = CASE WHEN trip_duration_mins > 0 THEN trip_distance_imputed / (trip_duration_mins / 60.0) ELSE 0 END;")
-    con.execute(f"UPDATE taxi_clean SET is_weekend = CASE WHEN dayofweek({pickup_col}) IN (0, 6) THEN 1 ELSE 0 END;")
+    
+    con.execute(f"""
+        UPDATE taxi_clean 
+        SET is_weekend = CASE WHEN dayofweek({pickup_ts}) IN (0, 6) THEN 1 ELSE 0 END
+    """)
+    
     con.execute("UPDATE taxi_clean SET speed_mph = 0 WHERE speed_mph IS NULL OR isinf(speed_mph) OR isnan(speed_mph)")
-    con.execute("UPDATE taxi_clean SET trip_duration_mins = 0 WHERE trip_duration_mins < 0")
+    con.execute("UPDATE taxi_clean SET trip_duration_mins = 0 WHERE trip_duration_mins < 0 OR trip_duration_mins IS NULL")
+    con.execute("UPDATE taxi_clean SET is_weekend = 0 WHERE is_weekend IS NULL")
+
     print("  Engineered features: duration, speed, is_weekend.")
     return con
 
@@ -71,13 +142,19 @@ def categorical_encoding(con, config):
     print(f"  One-hot encoding for payment types: {payment_types}")
     select_clauses = []
     for pt in payment_types:
-        pt_col_name = str(pt).replace('.', '_')
-        clause = f"CASE WHEN payment_type_imputed = {pt} THEN 1 ELSE 0 END AS payment_type_{pt_col_name}"
+        pt_str = str(pt) 
+        pt_col_name = pt_str.replace('.', '_').replace('-', '_')
+        
+        pt_val = f"'{pt_str}'" if isinstance(pt, str) else pt 
+        
+        clause = f"CASE WHEN payment_type_imputed = {pt_val} THEN 1 ELSE 0 END AS payment_type_{pt_col_name}"
         select_clauses.append(clause)
+        
     if not select_clauses:
         print("  No payment types found to encode. Skipping.")
         con.execute("CREATE TABLE taxi_encoded AS SELECT * FROM taxi_clean")
         return con
+        
     con.execute(f"CREATE TABLE taxi_encoded AS SELECT *, {', '.join(select_clauses)} FROM taxi_clean")
     print("  Performed one-hot encoding.")
     return con
@@ -163,11 +240,10 @@ def run_full_pipeline(config, global_results_df):
     run_results_df = pd.DataFrame(run_results_list)
     return pd.concat([global_results_df, run_results_df], ignore_index=True)
 
-
 if __name__ == "__main__":
-    RESULTS_DIR = os.environ.get('SCRIPT_RESULTS_DIR')
+    RESULTS_DIR = os.environ.get('SCRIPT_RESULTS_DIR') 
     if not RESULTS_DIR:
-        print("Error: RESULTS_DIR environment variable not set. Run this via run_fair.sh")
+        print("Error: SCRIPT_RESULTS_DIR environment variable not set. Run this via run.sh")
         RESULTS_DIR = "results/local_test/nyc_taxi/duckdb"
         os.makedirs(RESULTS_DIR, exist_ok=True)
 
@@ -196,17 +272,18 @@ if __name__ == "__main__":
     
     safe_max_mem_gb = total_mem_gb * 0.75
     total_file_count = len(all_files_sorted)
+    
     data_size_configs = {
-        '10%': all_files_sorted[:max(1, int(total_file_count * 0.10))],
-        '30%': all_files_sorted[:max(1, int(total_file_count * 0.30))],
-        '100%': all_files_sorted,
+        '1%': all_files_sorted[:max(1, int(total_file_count * 0.01))],
+        # '30%': all_files_sorted[:max(1, int(total_file_count * 0.30))],
+        # '100%': all_files_sorted,
     }
     system_size_configs = {
-        '10%': {'threads': max(1, int(total_cores * 0.10)), 'memory': f"{max(1, int(safe_max_mem_gb * 0.10))}GB"},
-        '30%': {'threads': max(1, int(total_cores * 0.30)), 'memory': f"{max(1, int(safe_max_mem_gb * 0.30))}GB"},
+        # '10%': {'threads': max(1, int(total_cores * 0.10)), 'memory': f"{max(1, int(safe_max_mem_gb * 0.10))}GB"},
+        # '30%': {'threads': max(1, int(total_cores * 0.30)), 'memory': f"{max(1, int(safe_max_mem_gb * 0.30))}GB"},
         '100%': {'threads': total_cores, 'memory': f"{int(safe_max_mem_gb)}GB"}
     }
-    
+
     CONFIGURATIONS = []
     for data_pct, file_list in data_size_configs.items():
         for sys_pct, sys_config in system_size_configs.items():
@@ -227,5 +304,8 @@ if __name__ == "__main__":
     all_results_df.to_csv(output_csv, index=False)
     
     print(f"\n--- DuckDB benchmarks complete ---")
-    print(all_results_df[['config_name', 'step', 'execution_time_s', 'peak_memory_mib']])
+    if not all_results_df.empty:
+        print(all_results_df[['config_name', 'step', 'execution_time_s', 'peak_memory_mib']])
+    else:
+        print("No results were generated.")
     print(f"Full results saved to {output_csv}")
