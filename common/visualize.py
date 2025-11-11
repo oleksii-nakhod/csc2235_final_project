@@ -14,29 +14,38 @@ def visualize_config_comparison(results_df, output_file):
         print(f"  No data for config comparison plot: {output_file}")
         return
 
-    if not all(col in results_df.columns for col in ['start_time', 'end_time', 'config_name', 'step']):
+    req_cols = ['start_time', 'end_time', 'execution_time_s', 'config_name', 'step']
+    if not all(col in results_df.columns for col in req_cols):
         print(f"  Result DataFrame is missing required columns for timeline.")
         return
 
     print(f"  Generating config comparison: {output_file}")
     pio.templates.default = "plotly_dark"
+
+    results_df['start_time'] = pd.to_numeric(results_df['start_time'])
+    results_df['execution_time_s'] = pd.to_numeric(results_df['execution_time_s'])
+    results_df['end_time'] = pd.to_numeric(results_df['end_time'])
     
-    fig = px.timeline(
+    fig = px.bar(
         results_df,
-        x_start="start_time",
-        x_end="end_time",
+        base="start_time",
+        x="execution_time_s",
         y="config_name",
         color="step",
+        orientation='h',
         title=f"Framework Config Comparison",
-        hover_data=['execution_time_s', 'peak_memory_mib', 'cpu_time_s']
+        hover_data=['execution_time_s', 'peak_memory_mib', 'cpu_time_s', 'start_time', 'end_time']
     )
-    
+
     fig.update_yaxes(autorange="reversed")
+    
     fig.update_layout(
         xaxis_title="Time (seconds)",
         yaxis_title="Benchmark Configuration",
-        legend_title="Pipeline Step"
+        legend_title="Pipeline Step",
+        xaxis=dict(range=[0, results_df['end_time'].max() * 1.05])
     )
+    
     fig.write_html(output_file)
 
 def visualize_framework_comparison(all_results_df, output_dir):
@@ -49,7 +58,6 @@ def visualize_framework_comparison(all_results_df, output_dir):
         
     print(f"  Generating framework comparison plots in: {output_dir}")
     
-    # 1. Total Execution Time Comparison (for 100% data/sys config)
     try:
         total_time_df = all_results_df.loc[
             (all_results_df['data_size_pct'] == '100%') &
@@ -68,7 +76,6 @@ def visualize_framework_comparison(all_results_df, output_dir):
     except Exception as e:
         print(f"  Could not generate total time plot: {e}")
 
-    # 2. Peak Memory Comparison (for 100% data/sys config)
     try:
         peak_mem_df = all_results_df.loc[
             (all_results_df['data_size_pct'] == '100%') &
@@ -101,7 +108,6 @@ if __name__ == "__main__":
         print(f"Error: Results directory not found: {TOP_LEVEL_RESULTS_DIR}")
         sys.exit(1)
 
-    # Loop through each pipeline (e.g., nyc_taxi)
     for pipeline_dir in glob.glob(os.path.join(TOP_LEVEL_RESULTS_DIR, '*')):
         if not os.path.isdir(pipeline_dir):
             continue
@@ -111,14 +117,12 @@ if __name__ == "__main__":
         
         all_framework_dfs = []
         
-        # Loop through each framework (e.g., duckdb, polars)
         for framework_dir in glob.glob(os.path.join(pipeline_dir, '*')):
             if not os.path.isdir(framework_dir):
                 continue
                 
             framework_name = os.path.basename(framework_dir)
             
-            # Find the CSV for this framework
             csv_path = os.path.join(framework_dir, f"{framework_name}_results.csv")
             if not os.path.exists(csv_path):
                 print(f"  No CSV found at {csv_path}")
@@ -130,14 +134,12 @@ if __name__ == "__main__":
                 df['framework'] = framework_name
                 all_framework_dfs.append(df)
                 
-                # 1. Generate the Config Comparison (timeline) for this framework
                 plot_path = os.path.join(framework_dir, f"config_comparison_timeline.html")
                 visualize_config_comparison(df, plot_path)
                 
             except Exception as e:
                 print(f"  Failed to process {csv_path}: {e}")
 
-        # 2. Generate the Framework Comparison (bar charts) for this pipeline
         if all_framework_dfs:
             pipeline_results_df = pd.concat(all_framework_dfs, ignore_index=True)
             visualize_framework_comparison(pipeline_results_df, pipeline_dir)
