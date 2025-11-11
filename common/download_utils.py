@@ -47,7 +47,6 @@ def download_taxi_data(year_month_list, local_dir="data/nyc_taxi"):
         print(f"  Downloading: {file_name} to {local_dir}/")
         url = f"{BASE_URL}{year}-{month_str}.parquet"
         try:
-            time.sleep(1)
             urllib.request.urlretrieve(url, local_path)
             print(f"  Success: Downloaded {file_name}")
         except Exception as e:
