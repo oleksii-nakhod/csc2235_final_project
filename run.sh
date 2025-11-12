@@ -25,7 +25,7 @@ if [ ! -d "$PIPELINE_DIR" ]; then
     exit 1
 fi
 
-TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
+TIMESTAMP=$(date -u +"%Y-%m-%d_%H-%M-%S")
 RESULTS_DIR="results/$TIMESTAMP"
 RESULTS_PIPELINE_DIR="$RESULTS_DIR/$PIPELINE_NAME"
 
