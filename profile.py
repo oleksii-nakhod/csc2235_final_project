@@ -4,13 +4,13 @@ Instructions:
 Wait for the node to be "Ready". This means the setup script
 has finished installing pip and all Python requirements.
 Your project code is in /local/repository. To run all benchmarks, execute:
-    sh /local/repository/run_benchmarks.sh
+    /local/repository/run_benchmarks.sh
 To run a specific benchmark:
-    sh /local/repository/run_benchmarks.sh <benchmark_name>
+    /local/repository/run_benchmarks.sh <benchmark_name>
 To run a specific benchmark with a specific framework:
-    sh /local/repository/run_benchmarks.sh <benchmark_name> <framework_name>
+    /local/repository/run_benchmarks.sh <benchmark_name> <framework_name>
 For example, to run the NYC Taxi benchmark with DuckDB, execute:
-    sh /local/repository/run_benchmarks.sh nyc_taxi duckdb
+    /local/repository/run_benchmarks.sh nyc_taxi duckdb
 """
 
 import geni.portal as portal
