@@ -12,6 +12,9 @@
 
 export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+cd "$SCRIPT_DIR"
+
 if [ "$#" -gt 2 ]; then
     echo "Usage: $0 [<pipeline_name> [<framework_name>]]"
     echo "Example (all): $0"
