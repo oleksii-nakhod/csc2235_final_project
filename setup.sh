@@ -2,7 +2,7 @@
 echo "Setup script is running as $(whoami)..." >> /local/repository/setup.log
 
 sudo DEBIAN_FRONTEND=noninteractive apt-get -y update
-sudo DEBIAN_FRONTEND=noninteractive apt-get -y install python3-venv python3-pip
+sudo DEBIAN_FRONTEND=noninteractive apt-get -y install python3-venv python3-pip openjdk-17-jdk-headless
 
 USER_NAME=$(stat -c '%U' /local/repository)
 USER_HOME=$(getent passwd "$USER_NAME" | cut -d: -f6)

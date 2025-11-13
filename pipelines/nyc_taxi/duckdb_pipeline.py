@@ -9,11 +9,46 @@ import urllib.request
 import math
 import warnings
 from memory_profiler import memory_usage
+import json
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.append(PROJECT_ROOT)
 
 from common.download_utils import get_year_month_list, download_taxi_data
+
+def calculate_and_save_stats(con, config):
+    """
+    Calculates aggregate stats and saves them to a JSON file.
+    """
+    print("  Calculating final statistics...")
+    
+    columns_to_check = [
+        "trip_duration_mins", "speed_mph", "is_weekend",
+        "fare_scaled", "dist_scaled", "speed_scaled"
+    ]
+    
+    aggs = []
+    for col in columns_to_check:
+        aggs.append(f"SUM(CAST({col} AS DOUBLE)) AS {col}_sum")
+        aggs.append(f"AVG(CAST({col} AS DOUBLE)) AS {col}_avg")
+        aggs.append(f"MIN({col}) AS {col}_min")
+        aggs.append(f"MAX({col}) AS {col}_max")
+        aggs.append(f"COUNT(CASE WHEN {col} IS NULL THEN 1 END) AS {col}_nulls")
+
+    query = f"""
+    SELECT
+        COUNT(*) AS total_rows,
+        {', '.join(aggs)}
+    FROM taxi_final
+    """
+    
+    stats_df = con.execute(query).df()
+    
+    output_path = os.path.join(os.environ.get('SCRIPT_RESULTS_DIR'), 'stats.json')
+    stats_df.to_json(output_path, orient="records", indent=2)
+    
+    print(f"  Final stats saved to {output_path}")
+    return con
 
 def connect_to_db(config):
     db_file = config.get('db_file', ':memory:')
@@ -186,7 +221,8 @@ def run_full_pipeline(config, global_results_df):
         (handle_missing_values, (None, config), {}),
         (feature_engineering, (None, config), {}),
         (categorical_encoding, (None, config), {}),
-        (numerical_scaling, (None, config), {})
+        (numerical_scaling, (None, config), {}),
+        (calculate_and_save_stats, (None, config), {})
     ]
     try:
         for i, (func, args, kwargs) in enumerate(pipeline_steps):
@@ -275,6 +311,7 @@ if __name__ == "__main__":
     
     data_size_configs = {
         '1%': all_files_sorted[:max(1, int(total_file_count * 0.01))],
+        '2%': all_files_sorted[:max(1, int(total_file_count * 0.02))],
         # '30%': all_files_sorted[:max(1, int(total_file_count * 0.30))],
         # '100%': all_files_sorted,
     }
