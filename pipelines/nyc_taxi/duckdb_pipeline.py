@@ -44,7 +44,8 @@ def calculate_and_save_stats(con, config):
     
     stats_df = con.execute(query).df()
     
-    output_path = os.path.join(os.environ.get('SCRIPT_RESULTS_DIR'), 'stats.json')
+    config_name = config.get('name', 'unknown_config')
+    output_path = os.path.join(os.environ.get('SCRIPT_RESULTS_DIR'), f'stats_{config_name}.json')
     stats_df.to_json(output_path, orient="records", indent=2)
     
     print(f"  Final stats saved to {output_path}")

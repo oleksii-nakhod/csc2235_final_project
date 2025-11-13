@@ -41,7 +41,8 @@ def calculate_and_save_stats(df, config):
     stats_row = df.agg(*aggs).collect()[0]
     stats_dict = stats_row.asDict()
 
-    output_path = os.path.join(os.environ.get('SCRIPT_RESULTS_DIR'), 'stats.json')
+    config_name = config.get('name', 'unknown_config')
+    output_path = os.path.join(os.environ.get('SCRIPT_RESULTS_DIR'), f'stats_{config_name}.json')
     with open(output_path, 'w') as f:
         json.dump([stats_dict], f, indent=2)
     

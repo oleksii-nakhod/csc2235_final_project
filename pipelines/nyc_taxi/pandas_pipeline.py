@@ -39,7 +39,8 @@ def calculate_and_save_stats(df, config):
         else:
             print(f"  Warning: Column '{col}' not found in Pandas DataFrame. Skipping stats.")
 
-    output_path = os.path.join(os.environ.get('SCRIPT_RESULTS_DIR'), 'stats.json')
+    config_name = config.get('name', 'unknown_config')
+    output_path = os.path.join(os.environ.get('SCRIPT_RESULTS_DIR'), f'stats_{config_name}.json')
     with open(output_path, 'w') as f:
         json.dump([stats], f, indent=2)
     

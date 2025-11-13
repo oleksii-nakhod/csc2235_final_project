@@ -60,9 +60,6 @@ def visualize_framework_comparison(all_results_df, output_dir):
     """
     Generates framework comparison bar charts for *each*
     data/system combination found in the results.
-    
-    1. A detailed Gantt chart (timeline) for pipeline step comparison.
-    2. A simple bar chart for peak memory comparison.
     """
     if all_results_df.empty:
         print(f"  No data for framework comparison plot.")
@@ -101,9 +98,9 @@ def visualize_framework_comparison(all_results_df, output_dir):
                 title = f'Framework Pipeline Timeline ({data_pct} Data, {sys_pct} System)'
                 filename = f"framework_comparison_timeline_{data_pct_safe}_data_{sys_pct_safe}_sys.html"
                 
-                current_combo_df['start_time'] = pd.to_numeric(current_combo_df['start_time'])
-                current_combo_df['execution_time_s'] = pd.to_numeric(current_combo_df['execution_time_s'])
-                current_combo_df['end_time'] = pd.to_numeric(current_combo_df['end_time'])
+                current_combo_df.loc[:, 'start_time'] = pd.to_numeric(current_combo_df['start_time'])
+                current_combo_df.loc[:, 'execution_time_s'] = pd.to_numeric(current_combo_df['execution_time_s'])
+                current_combo_df.loc[:, 'end_time'] = pd.to_numeric(current_combo_df['end_time'])
 
                 fig_time = px.bar(
                     current_combo_df,
@@ -148,79 +145,84 @@ def visualize_framework_comparison(all_results_df, output_dir):
         except Exception as e:
             print(f"      Could not generate peak memory plot: {e}")
 
-
-def reconcile_stats(stats_df, pipeline_name):
+def reconcile_stats(full_stats_df, pipeline_name):
     """
-    Compares the stats.json results from all frameworks and prints a report.
+    Compares the stats.json results from all frameworks, grouped by config,
+    and prints a report.
     """
     print(f"\n--- 📊 Reconciling Stats for Pipeline: {pipeline_name} ---")
     
-    if stats_df.empty:
+    if full_stats_df.empty:
         print("  No stats files found to reconcile.")
         return
 
-    if len(stats_df) < 2:
-        print(f"  Only one framework found ({stats_df['framework'].iloc[0]}). No comparison to make.")
-        return
-
-    baseline_fw = stats_df.iloc[0]['framework']
-    baseline_stats = stats_df.iloc[0]
+    all_configs = full_stats_df['config_name'].unique()
     
-    print(f"  Using '{baseline_fw}' as baseline.")
-    print(f"  Found {len(stats_df)} frameworks to check: {stats_df['framework'].tolist()}")
-
-    all_match = True
-    
-    TOLERANCE = 1e-9
-    
-    columns_to_check = [col for col in stats_df.columns if col != 'framework']
-
-    for index, current_stats in stats_df.iloc[1:].iterrows():
+    for config in all_configs:
+        print(f"\n--- Checking Config: {config} ---")
         
-        print(f"\n  Checking '{current_stats['framework']}' against '{baseline_fw}':")
-        fw_match = True
+        stats_df = full_stats_df[full_stats_df['config_name'] == config].reset_index()
+
+        if len(stats_df) < 2:
+            print(f"  Only one framework found ({stats_df['framework'].iloc[0]}). No comparison to make.")
+            continue
+
+        baseline_fw = stats_df.iloc[0]['framework']
+        baseline_stats = stats_df.iloc[0]
         
-        for col in columns_to_check:
-            baseline_val = baseline_stats[col]
-            current_val = current_stats[col]
+        print(f"  Using '{baseline_fw}' as baseline.")
+        print(f"  Found {len(stats_df)} frameworks to check: {stats_df['framework'].tolist()}")
+
+        all_match = True
+        TOLERANCE = 1e-9
+        
+        columns_to_check = [col for col in stats_df.columns if col not in ['framework', 'config_name', 'index']]
+
+        for index, current_stats in stats_df.iloc[1:].iterrows():
             
-            if pd.isna(baseline_val) or pd.isna(current_val):
-                if pd.isna(baseline_val) and pd.isna(current_val):
+            print(f"\n  Checking '{current_stats['framework']}' against '{baseline_fw}':")
+            fw_match = True
+            
+            for col in columns_to_check:
+                baseline_val = baseline_stats[col]
+                current_val = current_stats[col]
+                
+                if pd.isna(baseline_val) or pd.isna(current_val):
+                    if pd.isna(baseline_val) and pd.isna(current_val):
+                        continue
+                    print(f"    ❌ MISMATCH on '{col}': One value is NaN")
+                    fw_match = False
+                    all_match = False
                     continue
-                print(f"    ❌ MISMATCH on '{col}': One value is NaN")
-                fw_match = False
-                all_match = False
-                continue
 
-            if 'int' in str(type(baseline_val)):
-                if baseline_val != current_val:
-                    print(f"    ❌ MISMATCH on '{col}':")
-                    print(f"       - Baseline: {baseline_val}")
-                    print(f"       - Current:  {current_val}")
-                    fw_match = False
-                    all_match = False
-            else:
-                if not np.isclose(baseline_val, current_val, rtol=TOLERANCE, equal_nan=True):
-                    print(f"    ❌ MISMATCH on '{col}':")
-                    print(f"       - Baseline: {baseline_val:.10f}")
-                    print(f"       - Current:  {current_val:.10f}")
-                    fw_match = False
-                    all_match = False
-        
-        if fw_match:
-            print(f"    ✅ All stats match!")
+                is_int_col = col == 'total_rows' or col.endswith('_nulls') or col == 'is_weekend_sum'
 
-    print("\n--- 🏁 Reconciliation Complete ---")
-    if all_match:
-        print("✅ SUCCESS: All frameworks produced identical statistics!")
-    else:
-        print("❌ FAILED: One or more frameworks had different statistics.")
+                if is_int_col:
+                    if baseline_val != current_val:
+                        print(f"    ❌ MISMATCH on '{col}':")
+                        print(f"       - Baseline: {baseline_val}")
+                        print(f"       - Current:  {current_val}")
+                        fw_match = False
+                        all_match = False
+                else:
+                    if not np.isclose(baseline_val, current_val, rtol=TOLERANCE, equal_nan=True):
+                        print(f"    ❌ MISMATCH on '{col}':")
+                        print(f"       - Baseline: {baseline_val:.10f}")
+                        print(f"       - Current:  {current_val:.10f}")
+                        fw_match = False
+                        all_match = False
+            
+            if fw_match:
+                print(f"    ✅ All stats match!")
+
+        print("\n--- 🏁 Config Reconciliation Complete ---")
+        if all_match:
+            print(f"✅ SUCCESS for {config}: All frameworks produced identical statistics!")
+        else:
+            print(f"❌ FAILED for {config}: One or more frameworks had different statistics.")
+
 
 if __name__ == "__main__":
-    """
-    This script is called by run_fair.sh to generate all visualizations
-    and reconcile final statistics.
-    """
     if len(sys.argv) < 2:
         print(f"Usage: python3 {sys.argv[0]} <timestamped_results_dir>")
         sys.exit(1)
@@ -263,17 +265,22 @@ if __name__ == "__main__":
                 except Exception as e:
                     print(f"  Failed to process {csv_path}: {e}")
 
-            stats_path = os.path.join(framework_dir, "stats.json")
-            if not os.path.exists(stats_path):
-                print(f"  No stats.json found for {framework_name}")
-            else:
-                print(f"  Found stats.json for {framework_name}")
+            stats_files = glob.glob(os.path.join(framework_dir, "stats_*.json"))
+            if not stats_files:
+                print(f"  No stats.json files found for {framework_name}")
+                continue
+
+            for stats_path in stats_files:
                 try:
+                    config_name = os.path.basename(stats_path).replace('stats_', '').replace('.json', '')
+                    print(f"  Found {os.path.basename(stats_path)} for {framework_name}")
+
                     with open(stats_path, 'r') as f:
                         stats_data = json.load(f)
                         if stats_data:
-                            stats_df = pd.DataFrame(stats_data)
+                            stats_df = pd.DataFrame(stats_data) 
                             stats_df['framework'] = framework_name
+                            stats_df['config_name'] = config_name
                             all_framework_stats.append(stats_df)
                 except Exception as e:
                     print(f"  Failed to process {stats_path}: {e}")
@@ -284,7 +291,7 @@ if __name__ == "__main__":
 
         if all_framework_stats:
             pipeline_stats_df = pd.concat(all_framework_stats, ignore_index=True)
-            cols = ['framework'] + [c for c in pipeline_stats_df.columns if c != 'framework']
+            cols = ['config_name', 'framework'] + [c for c in pipeline_stats_df.columns if c not in ['config_name', 'framework']]
             pipeline_stats_df = pipeline_stats_df[cols]
             
             reconcile_stats(pipeline_stats_df, pipeline_name)
